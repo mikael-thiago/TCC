@@ -1,5 +1,6 @@
 from queue import Queue
 import threading
+from typing import Any, Tuple
 
 from loss_computer import LossComputer
 from memory import Memory
@@ -35,88 +36,109 @@ class Worker(threading.Thread):
         self.save_dir = save_dir
 
     def run(self):
-        local_episode = 0
+        max_global_steps = self.max_episodes * self.max_steps_per_episode
+        
+        episode_reward = 0
 
-        while Worker.global_episode < self.max_episodes:
-            replayMemory = Memory()
-            state = self.env.reset()
+        state = self.__reset()
 
-            episode_reward = 0
+        while Worker.global_episode < max_global_steps:
+          steps_performed, done, memory, last_state, acc_reward = self.__perform_steps(self.update_freq, state)
 
-            local_episode += 1
+          episode_reward += acc_reward
 
-            self.ep_loss = 0
+          gradients = self.__calculate_gradients(
+                  last_state=last_state, done=done, replay_memory=memory)
+          
+          with Worker.save_lock:
+            self.__update_global_model(gradients)
+            print('Worker {} Episode reward {}'.format(self.worker_id, episode_reward))
+            self.global_model.save(self.save_dir)
 
-            state = np.stack((state, state, state, state), axis=2)
-            state = np.reshape([state], (84, 84, 4))
+            Worker.global_episode += steps_performed
 
-            for step in range(self.max_steps_per_episode):
-                logits, v = self.model.predict(
-                    np.expand_dims(state, axis=0))
+          if done:
+            state = self.__reset()
+            acc_reward = 0
+          else:
+            state = last_state
+    
 
-                policy = tf.nn.softmax(logits)
+    def __perform_steps(self, steps: int, initial_state) -> Tuple[int, bool, Any, Any, float]:
+      replay_memory = Memory()
+      state = initial_state
+      steps_performed = 0
+      acc_reward = 0
+      done = False
 
-                action = np.random.choice(
-                    self.env.action_space.n, p=policy.numpy()[0])
+      for step in range(steps):
+        logits, _ = self.model.predict(
+            np.expand_dims(state, axis=0))
 
-                new_state, reward, done, _ = self.env.step(action)
-                new_state = np.append(new_state, state[:, :, :3], axis=2)
+        policy = tf.nn.softmax(logits)
 
-                episode_reward += reward
+        action = np.random.choice(
+            self.env.action_space.n, p=policy.numpy()[0])
 
-                # if Worker.global_episode % 10 == 0 and step == 0:
-                print('Worker {}, Action {}, Global Episode {}, Episode {} - Step {}, Reward: {} Lives: {}'.format(
-                    self.worker_id, action, Worker.global_episode, local_episode, step + 1, episode_reward, _['lives']))
+        # Concatena o novo estado aos ultimos 4 frames e remove o primeiro
+        new_state, reward, done, _ = self.env.step(action)
+        new_state = np.append(new_state, state[:, :, :3], axis=2)
 
-                replayMemory.store(state, action, reward)
+        # Coloca recompensa entre 1 e -1
+        reward = np.clip(reward, -1, 1)
 
-                if ((step+1) % self.update_freq == 0) or done:
-                    self.calculate_gradients_and_update_global_model(
-                        last_state=new_state, done=done, replayMemory=replayMemory)
+        replay_memory.store(state, action, reward)
 
-                    self.update_global_best_score(
-                        done=done, episode_reward=episode_reward)
+        steps_performed += 1
+        acc_reward += reward
 
-                if done:
-                    break
+        if done:
+            break
 
-                state = new_state
+        state = new_state
 
-            with Worker.save_lock:
-                print('Worker {} saving weights'.format(
-                    self.worker_id))
-                self.global_model.save(self.save_dir)
-                Worker.global_episode += 1
+      return steps_performed, done, replay_memory, state, acc_reward
 
-            self.result_queue.put(None)
-
-    def calculate_gradients_and_update_global_model(self, last_state, done: bool, replayMemory: Memory):
+    def __calculate_gradients(self, last_state, done: bool, replay_memory: Memory):
         with tf.GradientTape() as tape:
+            # Computa loss
             total_loss = self.loss_computer.compute(
                 last_state=last_state,
                 model=self.model,
                 action_size=self.env.action_space.n,
                 done=done,
-                replayMemory=replayMemory,
+                replay_memory=replay_memory,
                 discount_factor=self.discount_factor
             )
 
+            # Computa gradientes
             gradients = tape.gradient(
-                total_loss, self.model.trainable_weights)
+                total_loss, self.model.trainable_variables)
 
-            # print('Gradients {}'.format(np.array(gradients)[0]))
-
+            # Limita os gradientes para evitar degeneração do algoritmo
             gradients, _ = tf.clip_by_global_norm(gradients, 40)
 
-            # print('Gradients {}'.format(np.array(gradients)[0]))
+            return gradients
 
-            with Worker.save_lock:
-                self.opt.apply_gradients(
-                    zip(gradients, self.global_model.trainable_weights))
-                self.model.set_weights(
-                    self.global_model.get_weights())
-
-    def update_global_best_score(self, done: bool, episode_reward):
+    def __update_global_model(self, gradients):
+      # Aplica gradients a rede global e
+      # atualiza os pesos da rede local
+      self.opt.apply_gradients(
+          zip(gradients, self.global_model.trainable_variables))
+      self.model.set_weights(
+          self.global_model.get_weights())
+  
+    def __update_global_best_score(self, done: bool, episode_reward):
         if done and episode_reward > Worker.best_score:
             with Worker.save_lock:
                 Worker.best_score = episode_reward
+
+    def __reset(self):
+      state = self.env.reset()
+      # Será passado para a rede neural os últimos 4 frames coletados
+      # Assim é possível ela considerar informações derivadas como, por exemplo:
+      # Direção da bola no jogo Breakout, direção dos aliens no Space Invaders
+      # Para o primeiro passo, como não há frames anteriores, é utilizado o primeiro 4 vezes
+      state = np.stack((state, state, state, state), axis=2)
+      state = np.reshape([state], (84, 84, 4))
+      return state

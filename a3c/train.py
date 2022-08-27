@@ -1,16 +1,13 @@
 from tensorflow.keras.models import Model, Sequential
-from tensorflow.keras.layers import LSTM, Dense, Conv2D, Flatten
+from tensorflow.keras.layers import Reshape, Dense, Conv2D, Flatten
 
 import tensorflow as tf
 from agent import A3C
 from environment import GymEnvironment
-from PIL import Image
-
-
-import numpy as np
-
 
 def create_a3c_network(num_actions, state_shape, hiddenLayersUnits=[256]):
+    # Convolutional layers como descrito em mnih 2015
+    # http://proceedings.mlr.press/v48/mniha16-supp.pdf
     baseLayers = [
         Conv2D(16, (8, 8), strides=(4, 4),
                input_shape=state_shape, activation='relu'),
@@ -23,14 +20,15 @@ def create_a3c_network(num_actions, state_shape, hiddenLayersUnits=[256]):
         baseLayers.append(Dense(units, activation='relu'))
 
     commonNetwork = Sequential(baseLayers)
-    # commonNetwork.build((None, *state_shape))
 
     actor = Dense(num_actions, activation='linear')(commonNetwork.output)
     critic = Dense(1, activation='linear')(commonNetwork.output)
+    # Modificando formato de retorno de [[float]] para [float]
+    critic = Reshape(())(critic)
 
     model = Model(commonNetwork.inputs, [actor, critic])
 
-    print('Model shape {} AQUI'.format(model.output_shape))
+    print('Model output shape {}'.format(model.output_shape))
 
     return model
 
@@ -43,7 +41,6 @@ UPDATE_FREQUENCY = 5  # parametrizar pelo CLI
 NUMBER_OF_WORKERS = 4  # parametrizar pelo CLI
 
 env = GymEnvironment(env_name=ENV_NAME)
-
 
 optimizer = tf.keras.optimizers.Adam(learning_rate=5e-4)
 
