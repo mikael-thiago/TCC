@@ -1,110 +1,81 @@
+import sys
 import gym
 from gym.wrappers import AtariPreprocessing
-from collections import deque
-import numpy as np
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Flatten, Dense, Conv2D
-from tensorflow.python.keras.losses import MeanSquaredError
 
-from agent import DQN, Params
-from memory import Memory
+from .agent import DQN
+from .epsilon_decay_strategy import LinearEpsilonDecayStrategy
+from .memory import Memory
 
-import tensorflow as tf
+from .networks import model_dict, compile_network
 
+import argparse
 
-def create_network(num_actions):
-    network = Sequential([
-        Conv2D(32, 8, 4, input_shape=(84, 84, 1), activation='relu'),
-        Conv2D(64, 4, 2, activation='relu'),
-        Conv2D(64, 3, 1, activation='relu'),
-        Flatten(),
-        Dense(512),
-        Dense(num_actions, activation='linear')
-    ])
+parser = argparse.ArgumentParser(prog="TCC-Mikael-DDQN")
+parser.add_argument('--env', type=str, required=True)
+parser.add_argument('--model', default=1, type=int)
+parser.add_argument('--steps', default=int(1e6), type=int)
+parser.add_argument('--epsilon', default=1, type=int)
+parser.add_argument('--epsilon_min', default=0.1, type=float)
+parser.add_argument('--discount_factor', default=0.99, type=float)
+parser.add_argument('--update_frequency', default=1000, type=int)
+parser.add_argument('--save_frequency', default=1000, type=int)
+parser.add_argument('--start_step', default=0, type=int)
+parser.add_argument('--memory_size', default=int(1e5), type=int)
+parser.add_argument('--memory_batch_size', default=32, type=int)
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=25e-5, clipvalue=1)
-
-    network.compile(loss=MeanSquaredError(), optimizer=optimizer)
-    return network
+args = parser.parse_args()
 
 
-ENV_NAME = 'SpaceInvadersNoFrameskip-v4'
-SAVE_PATH = "models/DQN-"+ENV_NAME
+ENV_NAME = args.env
+SAVE_PATH = 'models/{}/DQN-{}'.format(args.model, ENV_NAME)
+STEPS = args.steps
+UPDATE_FREQUENCY = args.update_frequency
+SAVE_FREQUENCY = args.save_frequency
+DISCOUNT_FACTOR = args.discount_factor
+START_STEP = args.start_step
+MEMORY_SIZE = args.memory_size
+MEMORY_BATCH_SIZE = args.memory_batch_size
+EPSILON = args.epsilon
+EPSILON_MIN = args.epsilon_min
+STEPS_UNTIL_EPSILON_MIN = int(STEPS*0.1)
 
 env = gym.make(ENV_NAME)
-# Wrapper para transformar a imagem do atari de 210x160 com 128 bits de cor para 84x84 em escala de cinza
-# 210x160x128 -> 84x84x1
 env = AtariPreprocessing(
     env, frame_skip=4, grayscale_obs=True, grayscale_newaxis=True)
 
 env.seed(123)
 
-training_network = create_network(env.action_space.n)
-target_network = create_network(env.action_space.n)
-
-agent = DQN(training_network, target_network, Params(num_actions=env.action_space.n,
-            epsilon=1, epsilon_min=0.1, epsilon_decay=0.9, update_steps=500))
-replayMemory = Memory(size=400, sample_size=100)
-
 try:
-    training_network.load_weights(SAVE_PATH)
-    agent.updateTargetNetwork()
-    print('Models loaded from path {}'.format(SAVE_PATH))
+    agent = DQN.from_path(
+        env=env, compile_network=compile_network, path=SAVE_PATH)
 except:
-    pass
+    training_network = model_dict[args.model](env.action_space.n)
+    target_network = model_dict[args.model](env.action_space.n)
 
-print('Populating replay memory')
+    target_network.set_weights(training_network.get_weights())
 
-state = env.reset()
+    agent = DQN(
+        training_network,
+        target_network,
+        env=env
+    )
 
-# Popula replay memory utilizando ações aleatórias e armazenando os resutlados
-for i in range(replayMemory.size):
-    action = agent.predict(np.expand_dims(state, axis=0))
+replay_memory = Memory(size=MEMORY_SIZE, sample_size=MEMORY_BATCH_SIZE)
 
-    next_state, reward, done, _ = env.step(action)
+linear_epsilon_decay_strat = LinearEpsilonDecayStrategy(
+    steps_until_min=STEPS_UNTIL_EPSILON_MIN, epsilon_min=EPSILON_MIN)
 
-    replayMemory.push_experience([state, action, reward, next_state, done])
-    state = next_state
+epsilon = linear_epsilon_decay_strat.decay_epsilon(
+    epsilon=EPSILON, step=START_STEP)
 
-episodes = 100
-episode_steps = 10000
-save_steps = 5
-
-print('Starting training')
-
-for i in range(episodes):
-    print('Episode {}'.format(i + 1))
-
-    state = env.reset()
-    acc_reward = 0
-    steps = 0
-
-    for j in range(episode_steps):
-        action = agent.predict(np.expand_dims(state, axis=0))
-
-        next_state, reward, done, _ = env.step(action)
-
-        replayMemory.push_experience([state, action, reward, next_state, done])
-
-        agent.train(replayMemory)
-
-        if j != 0 and j % save_steps == 0:
-            print('Saving models at step {}'.format(j))
-            training_network.save_weights(SAVE_PATH)
-
-        acc_reward += reward
-        steps += 1
-
-        if j != 0 and j % agent.params.update_steps == 0:
-            print('Updating target network at step {}'.format(j))
-            agent.updateTargetNetwork()
-
-        print('Step {} - Acc reward: {}'.format(j, acc_reward))
-        print('Done: {} Lives {}'.format(done, _.get('lives')))
-
-        state = next_state
-
-        if done:
-            print('Done, so updating target network')
-            agent.updateTargetNetwork()
-            break
+agent.train(
+    steps=STEPS,
+    update_steps=UPDATE_FREQUENCY,
+    save_steps=SAVE_FREQUENCY,
+    save_path=SAVE_PATH,
+    epsilon=epsilon,
+    epsilon_decay_strat=linear_epsilon_decay_strat,
+    discount_factor=DISCOUNT_FACTOR,
+    start_step=START_STEP,
+    replay_memory=replay_memory
+)

@@ -1,5 +1,6 @@
 
 from queue import Queue
+import threading
 from tensorflow.keras.models import Model, Sequential, load_model, clone_model
 
 from environment import Environment
@@ -13,7 +14,6 @@ class A3C():
     def __init__(self, model: Model, env: Environment, optimizer=None) -> None:
         self.model = model
         self.env = env
-        self.optimizer = optimizer
 
         # self.model.compile(optimizer=optimizer, loss=[self.loss])
 
@@ -22,12 +22,9 @@ class A3C():
     def loss(self, *args):
         print(args)
 
-    def train(self, max_steps_per_episode: int, episodes: int, update_frequency: int, save_path: str, number_of_workers: int):
+    def train(self, max_steps: int, update_frequency: int, save_path: str, number_of_workers: int, optimizer):
         result_queue = Queue()
-
-        if not self.optimizer:
-            raise Exception(
-                'The agent cannot be trained, because it has no optimizer')
+        lock = threading.Lock()
 
         workers = [
             Worker(
@@ -36,13 +33,13 @@ class A3C():
                 env=self.env.clone(),
                 discount_factor=.99,
                 global_model=self.model,
-                loss_computer=LossComputer(entropyBias=.01),
-                opt=self.optimizer,
+                loss_computer=LossComputer(entropy_weight=.01),
+                opt=optimizer,
                 worker_id=i,
-                max_episodes=episodes,
-                max_steps_per_episode=max_steps_per_episode,
+                max_steps=max_steps,
                 update_freq=update_frequency,
-                save_dir=save_path
+                save_dir=save_path,
+                save_lock=lock
             ) for i in range(number_of_workers)
         ]
 
@@ -92,11 +89,11 @@ class A3C():
             self.env.close()
 
     @staticmethod
-    def from_path(path: str, env: Environment, optimizer=None):
+    def from_path(path: str, env: Environment):
         try:
             model = load_model(path)
             model.compile()
             print('Model shape {}'.format(model.input_shape))
-            return A3C(model=model, env=env, optimizer=optimizer)
+            return A3C(model=model, env=env)
         except:
             raise Exception('Error loading model from path {}'.format(path))

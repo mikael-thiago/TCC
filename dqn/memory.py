@@ -11,11 +11,6 @@ class Memory:
     def push_experience(self, experience):
         state, action, reward, next_state, done = experience
 
-        if done:
-            done = 0
-        else:
-            done = 1
-
         self.memory.append([state, action, reward, next_state, done])
 
     def get_experiences(self):

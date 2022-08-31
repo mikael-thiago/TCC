@@ -1,18 +1,18 @@
 from typing import List
 import numpy as np
 
-from memory import Memory
+from .memory import Memory
 import tensorflow as tf
 
-import sys
+from tensorflow.keras.models import Model
 
 
 class LossComputer():
-    def __init__(self, entropyBias, v_loss_weight=0.5) -> None:
-        self.entropyBias = entropyBias
+    def __init__(self, entropy_weight, v_loss_weight=0.5) -> None:
+        self.entropy_weight = entropy_weight
         self.v_loss_weight = v_loss_weight
 
-    def compute(self, last_state, model, action_size: int, done: bool, replay_memory: Memory, discount_factor: float):
+    def compute(self, last_state, model: Model, action_size: int, done: bool, replay_memory: Memory, discount_factor: float):
 
         discounted_rewards = self.__compute_discounted_rewards(
             rewards=replay_memory.rewards, done=done, last_state=last_state, model=model, discount_factor=discount_factor)
@@ -21,7 +21,7 @@ class LossComputer():
         # Values Shape (None, )
         logits, values = model(
             tf.convert_to_tensor(np.array(replay_memory.states),
-                                 dtype=tf.float32))
+                                 dtype=tf.float32), training=True)
 
         d_rewards_tensor = tf.convert_to_tensor(discounted_rewards,
                                                 dtype=tf.float32)
@@ -57,18 +57,20 @@ class LossComputer():
         p_loss = p_loss * tf.stop_gradient(advantage)
 
         # Subtrai-se entropia do loss, pois o objetivo é maximizá-la para estimular a exploração
-        p_loss = p_loss - self.entropyBias * entropy
+        p_loss = p_loss - self.entropy_weight * entropy
 
         # print('V_LOSS {}'.format(v_loss))
         # print('P_LOSS {}'.format(p_loss))
         # print('COMBINED_LOSS {}'.format((self.v_loss_weight * v_loss) + p_loss))
-        print('REDUCED_SUM_LOSS {}'.format(tf.reduce_sum((self.v_loss_weight * v_loss) + p_loss)))
+        # print('REDUCED_SUM_LOSS {}'.format(
+        # tf.reduce_sum((self.v_loss_weight * v_loss) + p_loss)))
         # print('REDUCED_MEAN_LOSS {}'.format(tf.reduce_mean((self.v_loss_weight * v_loss) + p_loss)))
 
-        total_loss = tf.reduce_sum((self.v_loss_weight * v_loss) + p_loss)
+        total_loss = tf.reduce_mean((self.v_loss_weight * v_loss) + p_loss)
 
         # print('LOSS REDUCED {}'.format(total_loss))
 
+        # return (self.v_loss_weight * v_loss) + p_loss
         return total_loss
 
     def __compute_discounted_rewards(self, rewards: List, done: bool, model, last_state, discount_factor: float):
