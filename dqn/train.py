@@ -7,6 +7,7 @@ from .epsilon_decay_strategy import LinearEpsilonDecayStrategy
 from .memory import Memory
 
 from .networks import model_dict, compile_network
+import tensorflow as tf
 
 import argparse
 
@@ -27,7 +28,8 @@ args = parser.parse_args()
 
 
 ENV_NAME = args.env
-SAVE_PATH = 'models/{}/DQN-{}'.format(args.model, ENV_NAME)
+SAVE_DIR = 'dqn/models/{}/DQN-{}'.format(args.model, ENV_NAME)
+LOG_DIR = 'logs/models/{}/{}'.format(args.model, ENV_NAME)
 STEPS = args.steps
 UPDATE_FREQUENCY = args.update_frequency
 SAVE_FREQUENCY = args.save_frequency
@@ -47,7 +49,7 @@ env.seed(123)
 
 try:
     agent = DQN.from_path(
-        env=env, compile_network=compile_network, path=SAVE_PATH)
+        env=env, compile_network=compile_network, path=SAVE_DIR)
 except:
     training_network = model_dict[args.model](env.action_space.n)
     target_network = model_dict[args.model](env.action_space.n)
@@ -63,19 +65,22 @@ except:
 replay_memory = Memory(size=MEMORY_SIZE, sample_size=MEMORY_BATCH_SIZE)
 
 linear_epsilon_decay_strat = LinearEpsilonDecayStrategy(
-    steps_until_min=STEPS_UNTIL_EPSILON_MIN, epsilon_min=EPSILON_MIN)
+    steps_until_min=STEPS_UNTIL_EPSILON_MIN, epsilon_initial=EPSILON, epsilon_min=EPSILON_MIN)
 
-epsilon = linear_epsilon_decay_strat.decay_epsilon(
+epsilon = linear_epsilon_decay_strat.get_epsilon(
     epsilon=EPSILON, step=START_STEP)
+
+tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR)
 
 agent.train(
     steps=STEPS,
     update_steps=UPDATE_FREQUENCY,
     save_steps=SAVE_FREQUENCY,
-    save_path=SAVE_PATH,
+    save_path=SAVE_DIR,
     epsilon=epsilon,
     epsilon_decay_strat=linear_epsilon_decay_strat,
     discount_factor=DISCOUNT_FACTOR,
     start_step=START_STEP,
-    replay_memory=replay_memory
+    replay_memory=replay_memory,
+    callbacks=[]
 )

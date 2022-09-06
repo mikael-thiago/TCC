@@ -1,0 +1,23 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[scripts]
+train_dqn = "python -m dqn.train"
+test_dqn = "python -m dqn.test"
+train_a3c = "python -m a3c.train"
+test_a3c = "python -m a3c.test"
+
+[packages]
+tensorflow = "==2.6.0"
+keras = "==2.6.0"
+gym = "==0.21.0"
+ale-py = "==0.7.2"
+tensorboard = "==2.6.0"
+protobuf = "==3.20.*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.9"

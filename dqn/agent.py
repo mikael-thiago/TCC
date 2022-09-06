@@ -1,5 +1,4 @@
 import numpy as np
-from tensorflow.python.keras.engine.training import Model
 from .epsilon_decay_strategy import EpsilonDecayStrategy
 from .memory import Memory
 from tensorflow.keras.models import Model, load_model, clone_model
@@ -12,11 +11,9 @@ class DQN():
         self.target_network = target_network
         self.env = env
 
-    def play(self):
+    def play(self, epsilon: float):
         state = self.env.reset()
         state = PreProcessing.replicate_frame(frame=state)
-        # state = np.stack((state, state, state, state), axis=2)
-        # state = np.reshape([state], (84, 84, 4))
 
         done = False
 
@@ -24,7 +21,8 @@ class DQN():
         acc_reward = 0
 
         while not done:
-            action = self.__predict(np.expand_dims(state, axis=0), test=True)
+            action = self.__predict(np.expand_dims(
+                state, axis=0), epsilon=epsilon)
             next_state, reward, done, _ = self.env.step(action)
             next_state = PreProcessing.stack_frame(
                 previous_frames=state, new_frame=next_state)
@@ -48,15 +46,18 @@ class DQN():
         epsilon: int,
         epsilon_decay_strat: EpsilonDecayStrategy,
         replay_memory: Memory,
+        callbacks=[],
         discount_factor: float = 0.99,
-        start_step: int = 0
+        start_step: int = 0,
     ):
         self.__populate_replay_memory(
             replay_memory=replay_memory, epsilon=epsilon)
 
+        print('---------------------------')
         print('Starting training')
         print('Training args:\nSteps: {}\nUpdate frequency: {}\nSave frequency: {}\nEpsilon: {}\nDiscount factor: {}\nStart step: {}'.format(
             steps, update_steps, save_steps, epsilon, discount_factor, start_step))
+        print('---------------------------')
 
         global_steps = start_step
 
@@ -89,7 +90,8 @@ class DQN():
 
                 self.__train_step(
                     experiences=replay_memory,
-                    discount_factor=discount_factor
+                    discount_factor=discount_factor,
+                    callbacks=callbacks
                 )
 
                 epsilon = epsilon_decay_strat.decay_epsilon(epsilon)
@@ -141,7 +143,7 @@ class DQN():
                 [state, action, reward, next_state, done])
             state = next_state
 
-    def __train_step(self, experiences: Memory, discount_factor: float):
+    def __train_step(self, experiences: Memory, discount_factor: float, callbacks=[]):
         batch = experiences.get_experiences()
 
         states = np.array([e[0] for e in batch], dtype='float32')
@@ -181,12 +183,13 @@ class DQN():
             states,
             np.array(q_values_updated),
             batch_size=batch_size,
-            verbose=0
+            verbose=0,
+            callbacks=callbacks
         )
 
-    def __predict(self, inputs, epsilon: float = 0, test: bool = False):
+    def __predict(self, inputs, epsilon: float = 0):
         # flag test indica se o algoritmo está rodando pra valer, nesse caso, não é considerada a ação aleatória
-        if (not test) and np.random.rand() < epsilon:
+        if np.random.rand() < epsilon:
             action = np.random.randint(0, self.env.action_space.n)
         else:
             action = np.argmax(self.training_network.predict(inputs)[0])
@@ -203,6 +206,9 @@ class DQN():
             compile_network(network)
             target_network = clone_model(network)
             compile_network(network)
+            print('---------------------------')
+            print('Model successfully loaded!')
+            print('---------------------------')
             return DQN(training_network=network, target_network=target_network, env=env)
         except:
             raise Exception('Error loading model from path {}'.format(path))

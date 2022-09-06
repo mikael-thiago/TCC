@@ -6,11 +6,11 @@ from .networks import compile_network
 
 
 ENV_NAME = 'BreakoutNoFrameskip-v4'
-SAVE_PATH = "models/DQN-"+ENV_NAME
+SAVE_PATH = 'dqn/models/{}/DQN-{}'.format(1, ENV_NAME)
 
 env = gym.make(ENV_NAME, render_mode='human')
 env = AtariPreprocessing(env, frame_skip=4, grayscale_newaxis=True)
 
 agent = DQN.from_path(env=env, compile_network=compile_network, path=SAVE_PATH)
 
-agent.play()
+agent.play(epsilon=0.01)

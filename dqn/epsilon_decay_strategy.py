@@ -8,15 +8,13 @@ class EpsilonDecayStrategy(abc.ABC):
 
 
 class LinearEpsilonDecayStrategy(EpsilonDecayStrategy):
-    def __init__(self, steps_until_min: int, epsilon_min: float) -> None:
+    def __init__(self, steps_until_min: int, epsilon_initial: float, epsilon_min: float) -> None:
         super().__init__()
-        self.steps_until_min = steps_until_min
         self.epsilon_min = epsilon_min
+        self.subtraction_step = (epsilon_initial-epsilon_min)/steps_until_min
 
-    def decay_epsilon(self, epsilon: float, **kwargs) -> float:
-        step = kwargs.get('step')
-        subtraction_step = epsilon/self.steps_until_min
+    def decay_epsilon(self, epsilon: float) -> float:
+        return max(epsilon-self.subtraction_step, self.epsilon_min)
 
-        if step:
-            return max(epsilon - (step * subtraction_step), self.epsilon_min)
-        return max(epsilon-subtraction_step, self.epsilon_min)
+    def get_epsilon(self, epsilon: float, step: int) -> float:
+        return max(epsilon - (step * self.subtraction_step), self.epsilon_min)
