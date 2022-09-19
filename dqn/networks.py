@@ -8,7 +8,8 @@ import tensorflow as tf
 def compile_network(network: Model):
     optimizer = tf.keras.optimizers.Adam(
         learning_rate=10e-4, epsilon=1e-6, clipnorm=10)
-    network.compile(loss=losses.MeanSquaredError(), optimizer=optimizer)
+    network.compile(loss=losses.MeanSquaredError(),
+                    optimizer=optimizer, metrics=['MeanSquaredError'])
 
 
 def create_network(num_actions: int, dense_units=[512, 512]):

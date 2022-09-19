@@ -3,6 +3,7 @@ from .epsilon_decay_strategy import EpsilonDecayStrategy
 from .memory import Memory
 from tensorflow.keras.models import Model, load_model, clone_model
 from shared.pre_processing import PreProcessing
+import tensorflow as tf
 
 
 class DQN():
@@ -46,10 +47,14 @@ class DQN():
         epsilon: int,
         epsilon_decay_strat: EpsilonDecayStrategy,
         replay_memory: Memory,
-        callbacks=[],
         discount_factor: float = 0.99,
         start_step: int = 0,
+        log_dir: str = ''
     ):
+        file_writer = tf.summary.create_file_writer(
+            log_dir)
+        file_writer.set_as_default()
+
         self.__populate_replay_memory(
             replay_memory=replay_memory, epsilon=epsilon)
 
@@ -62,13 +67,14 @@ class DQN():
         global_steps = start_step
 
         episode = 0
+
         while True:
             state = self.env.reset()
             state = PreProcessing.replicate_frame(state, number_of_frames=4)
             # state = np.stack((state, state, state, state), axis=2)
             # state = np.reshape([state], (84, 84, 4))
 
-            acc_reward = 0
+            episode_reward = 0
             steps = 0
             step = 0
 
@@ -91,7 +97,7 @@ class DQN():
                 self.__train_step(
                     experiences=replay_memory,
                     discount_factor=discount_factor,
-                    callbacks=callbacks
+                    step=global_steps
                 )
 
                 epsilon = epsilon_decay_strat.decay_epsilon(epsilon)
@@ -105,15 +111,18 @@ class DQN():
 
                 if global_steps % log_frequency == 0:
                     print(
-                        'Episode {} Step {} Global Step {} - Acc reward: {} Epsilon {}'.format(episode, step, global_steps, acc_reward, epsilon))
+                        'Episode {} Step {} Global Step {} - Acc reward: {} Epsilon {}'.format(episode, step, global_steps, episode_reward, epsilon))
 
                 state = next_state
-                acc_reward += reward
+                episode_reward += reward
                 steps += 1
                 step += 1
                 global_steps += 1
 
-            self.__update_target_network()
+            tf.summary.scalar('Episode reward',
+                              data=episode_reward, step=episode)
+
+            # self.__update_target_network()
             episode += 1
 
     def __save_model_if_necessary(self, step: int, save_steps: int, save_path: str):
@@ -143,7 +152,7 @@ class DQN():
                 [state, action, reward, next_state, done])
             state = next_state
 
-    def __train_step(self, experiences: Memory, discount_factor: float, callbacks=[]):
+    def __train_step(self, experiences: Memory, discount_factor: float, step: int):
         batch = experiences.get_experiences()
 
         states = np.array([e[0] for e in batch], dtype='float32')
@@ -179,13 +188,15 @@ class DQN():
              q_values_next_actions * dones)
 
         # Executa o treinamento utilizando um batch de estados e q values atualizados
-        self.training_network.fit(
+        obj = self.training_network.fit(
             states,
             np.array(q_values_updated),
             batch_size=batch_size,
-            verbose=0,
-            callbacks=callbacks
+            verbose=0
         )
+
+        tf.summary.scalar('Loss',
+                          data=obj.history['loss'][0], step=step)
 
     def __predict(self, inputs, epsilon: float = 0):
         # flag test indica se o algoritmo está rodando pra valer, nesse caso, não é considerada a ação aleatória

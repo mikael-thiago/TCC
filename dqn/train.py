@@ -29,7 +29,7 @@ args = parser.parse_args()
 
 ENV_NAME = args.env
 SAVE_DIR = 'dqn/models/{}/DQN-{}'.format(args.model, ENV_NAME)
-LOG_DIR = 'logs/models/{}/{}'.format(args.model, ENV_NAME)
+LOG_DIR = 'logs/dqn/{}/{}'.format(args.model, ENV_NAME)
 STEPS = args.steps
 UPDATE_FREQUENCY = args.update_frequency
 SAVE_FREQUENCY = args.save_frequency
@@ -70,8 +70,6 @@ linear_epsilon_decay_strat = LinearEpsilonDecayStrategy(
 epsilon = linear_epsilon_decay_strat.get_epsilon(
     epsilon=EPSILON, step=START_STEP)
 
-tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR)
-
 agent.train(
     steps=STEPS,
     update_steps=UPDATE_FREQUENCY,
@@ -82,5 +80,5 @@ agent.train(
     discount_factor=DISCOUNT_FACTOR,
     start_step=START_STEP,
     replay_memory=replay_memory,
-    callbacks=[]
+    log_dir=LOG_DIR
 )
