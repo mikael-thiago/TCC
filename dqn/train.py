@@ -1,13 +1,13 @@
-import sys
 import gym
 from gym.wrappers import AtariPreprocessing
+
+from shared.gpu import GpuUtils
 
 from .agent import DQN
 from .epsilon_decay_strategy import LinearEpsilonDecayStrategy
 from .memory import Memory
 
-from .networks import model_dict, compile_network
-import tensorflow as tf
+from .networks import model_dict
 
 import argparse
 
@@ -16,13 +16,15 @@ parser.add_argument('--env', type=str, required=True)
 parser.add_argument('--model', default=1, type=int)
 parser.add_argument('--steps', default=int(1e6), type=int)
 parser.add_argument('--epsilon', default=1, type=int)
-parser.add_argument('--epsilon_min', default=0.1, type=float)
+parser.add_argument('--epsilon_min', default=0.05, type=float)
 parser.add_argument('--discount_factor', default=0.99, type=float)
 parser.add_argument('--update_frequency', default=1000, type=int)
-parser.add_argument('--save_frequency', default=1000, type=int)
+parser.add_argument('--save_frequency', default=10000, type=int)
 parser.add_argument('--start_step', default=0, type=int)
 parser.add_argument('--memory_size', default=int(1e5), type=int)
 parser.add_argument('--memory_batch_size', default=32, type=int)
+# 5GB of max GPU memory for default
+parser.add_argument('--max_memory', default=1024*5, type=int)
 
 args = parser.parse_args()
 
@@ -39,7 +41,11 @@ MEMORY_SIZE = args.memory_size
 MEMORY_BATCH_SIZE = args.memory_batch_size
 EPSILON = args.epsilon
 EPSILON_MIN = args.epsilon_min
-STEPS_UNTIL_EPSILON_MIN = int(STEPS*0.1)
+STEPS_UNTIL_EPSILON_MIN = int(STEPS*0.3)
+MAX_MEMORY = args.max_memory
+
+if MAX_MEMORY:
+    GpuUtils.limit_memory_usage(max_memory=MAX_MEMORY)
 
 env = gym.make(ENV_NAME)
 env = AtariPreprocessing(
@@ -47,20 +53,21 @@ env = AtariPreprocessing(
 
 env.seed(123)
 
-try:
-    agent = DQN.from_path(
-        env=env, compile_network=compile_network, path=SAVE_DIR)
-except:
-    training_network = model_dict[args.model](env.action_space.n)
-    target_network = model_dict[args.model](env.action_space.n)
+# try:
+#     agent = DQN.from_path(
+#         env=env, compile_network=compile_network, path=SAVE_DIR)
+# except:
+#     print('Couldn\'t load the model, creating one!')
+training_network = model_dict[args.model](env.action_space.n)
+target_network = model_dict[args.model](env.action_space.n)
 
-    target_network.set_weights(training_network.get_weights())
+target_network.set_weights(training_network.get_weights())
 
-    agent = DQN(
-        training_network,
-        target_network,
-        env=env
-    )
+agent = DQN(
+    training_network,
+    target_network,
+    env=env
+)
 
 replay_memory = Memory(size=MEMORY_SIZE, sample_size=MEMORY_BATCH_SIZE)
 

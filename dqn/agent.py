@@ -67,15 +67,13 @@ class DQN():
         global_steps = start_step
 
         episode = 0
+        moving_average = 0
 
         while True:
             state = self.env.reset()
             state = PreProcessing.replicate_frame(state, number_of_frames=4)
-            # state = np.stack((state, state, state, state), axis=2)
-            # state = np.reshape([state], (84, 84, 4))
 
             episode_reward = 0
-            steps = 0
             step = 0
 
             done = False
@@ -115,14 +113,26 @@ class DQN():
 
                 state = next_state
                 episode_reward += reward
-                steps += 1
                 step += 1
                 global_steps += 1
 
+                tf.summary.scalar('Episode reward (on step)',
+                                  data=episode_reward, step=global_steps)
+
+                if global_steps == steps:
+                    break
+
+            moving_average = moving_average * \
+                (episode + 1) + episode_reward / (episode+1) + 1
+
+            tf.summary.scalar('Episode reward (moving average)',
+                              data=moving_average, step=episode)
             tf.summary.scalar('Episode reward',
                               data=episode_reward, step=episode)
 
-            # self.__update_target_network()
+            if global_steps == steps:
+                break
+
             episode += 1
 
     def __save_model_if_necessary(self, step: int, save_steps: int, save_path: str):
